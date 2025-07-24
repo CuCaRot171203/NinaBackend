@@ -6,7 +6,7 @@ require('dotenv').config();
 const app = express();
 
 app.use(cors({
-  origin: ['http://localhost:8080', 'http://127.0.0.1:8080', 'https://ninawitch-two.vercel.app'],
+  origin: ['http://localhost:8080', 'http://127.0.0.1:8080', 'https://ninawitch-two.vercel.app', 'https://ninawitch-vi.vercel.app'],
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }))
