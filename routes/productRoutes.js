@@ -10,16 +10,19 @@ const {
     updateProduct,
     deleteProduct,
     getProductById,
-    filterProducts
+    filterProducts,
+    getRandomProducts
 } = require('../controllers/productController');
 
 router.post('/', upload.single('image'), createProduct);
 router.get('/', getProducts);
 router.get('/filter', filterProducts);
+router.get('/filter/advanced', filterProducts);
+router.get('/random', getRandomProducts);
 router.get('/:id', getProductById);
 router.put('/:id', upload.single('image'), updateProduct);
 router.delete('/:id', deleteProduct);
-router.get('/filter/advanced', filterProducts);
+
 
 
 module.exports = router;

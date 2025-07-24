@@ -1,7 +1,9 @@
 const Product = require("../models/Product");
+const Category = require('../models/Category')
 const { sendMail, buildProductEmail } = require('../utils/mailer')
 const Subcribe = require('../models/Subcribe')
 const User = require('../models/User')
+const mongoose = require('mongoose');
 
 // Create product
 exports.createProduct = async (req, res) => {
@@ -158,39 +160,140 @@ exports.getProductById = async (req, res) => {
   }
 };
 
+// exports.filterProducts = async (req, res) => {
+//   try {
+//     const page = parseInt(req.query.page) || 1;
+//     const limit = parseInt(req.query.limit) || 10;
+//     const category = req.query.category;
+//     const priceFrom = parseFloat(req.query.priceFrom);
+//     const priceTo = parseFloat(req.query.priceTo);
+
+//     const query = {};
+
+//     if (category) {
+//       query.category = category;
+//     }
+
+//     if (!isNaN(priceFrom) || !isNaN(priceTo)) {
+//       query.price = {};
+//       if (!isNaN(priceFrom)) query.price.$gte = priceFrom;
+//       if (!isNaN(priceTo)) query.price.$lte = priceTo;
+//     }
+
+//     const skip = (page - 1) * limit;
+
+//     const [products, total] = await Promise.all([
+//       Product.find(query)
+//         .populate('category', 'name')
+//         .skip(skip)
+//         .limit(limit),
+//       Product.countDocuments(query)
+//     ]);
+
+//     res.status(200).json({ products, total });
+//   } catch (error) {
+//     console.error("🔥 Lỗi ở filterProducts:", error);
+//     res.status(500).json({ message: error.message });
+//   }
+// };
+
 exports.filterProducts = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
-    const category = req.query.category;
-    const priceFrom = parseFloat(req.query.priceFrom);
-    const priceTo = parseFloat(req.query.priceTo);
+    const skip = (page - 1) * limit;
+
+    const rawCategory = req.query.category;
+    const rawPriceFrom = req.query.priceFrom;
+    const rawPriceTo = req.query.priceTo;
+
+    const priceFrom = rawPriceFrom ? parseFloat(rawPriceFrom) : undefined;
+    const priceTo = rawPriceTo ? parseFloat(rawPriceTo) : undefined;
+
+    if (rawPriceFrom && isNaN(priceFrom)) {
+      return res.status(400).json({ message: 'Invalid priceFrom format. Must be a number.' });
+    }
+    if (rawPriceTo && isNaN(priceTo)) {
+      return res.status(400).json({ message: 'Invalid priceTo format. Must be a number.' });
+    }
+
+    // if (!rawCategory && !rawPriceFrom && !rawPriceTo) {
+    //   return res.status(400).json({ message: 'At least one filter (category or price) must be provided.' });
+    // }
 
     const query = {};
 
-    if (category) {
-      query.category = category;
+    // ✅ Nếu rawCategory là ObjectId hợp lệ => dùng trực tiếp
+    if (rawCategory) {
+      if (mongoose.Types.ObjectId.isValid(rawCategory)) {
+        query.category = rawCategory;
+      } else {
+        const categoryDoc = await Category.findOne({
+          $or: [
+            { 'name.en': new RegExp(`^${rawCategory}$`, 'i') },
+            { 'name.vi': new RegExp(`^${rawCategory}$`, 'i') }
+          ]
+        });
+
+        if (!categoryDoc) {
+          return res.status(404).json({ message: `Category "${rawCategory}" not found.` });
+        }
+
+        query.category = categoryDoc._id;
+      }
     }
 
-    if (!isNaN(priceFrom) || !isNaN(priceTo)) {
-      query.price = {};
-      if (!isNaN(priceFrom)) query.price.$gte = priceFrom;
-      if (!isNaN(priceTo)) query.price.$lte = priceTo;
-    }
+    const allProducts = await Product.find(query).populate('category', 'name');
 
-    const skip = (page - 1) * limit;
+    const parsePrice = (str) => {
+      if (typeof str !== 'string') return NaN;
+      const cleaned = str.replace(/[^\d]/g, '');
+      return parseFloat(cleaned);
+    };
 
-    const [products, total] = await Promise.all([
-      Product.find(query)
-        .populate('category', 'name')
-        .skip(skip)
-        .limit(limit),
-      Product.countDocuments(query)
-    ]);
+    const filtered = allProducts.filter((product) => {
+      const priceRaw = product.price;
 
-    res.status(200).json({ products, total });
+      if (typeof priceRaw === 'string' && priceRaw.toLowerCase().includes('contact')) {
+        return true;
+      }
+
+      const priceNum = parsePrice(priceRaw);
+      if (isNaN(priceNum)) return false;
+
+      if (!isNaN(priceFrom) && priceNum < priceFrom) return false;
+      if (!isNaN(priceTo) && priceNum > priceTo) return false;
+
+      return true;
+    });
+
+    const total = filtered.length;
+    const paginated = filtered.slice(skip, skip + limit);
+
+    return res.status(200).json({ products: paginated, total });
+
   } catch (error) {
-    console.error("🔥 Lỗi ở filterProducts:", error);
-    res.status(500).json({ message: error.message });
+    console.error("🔥 filterProducts error:", error);
+    return res.status(500).json({ message: 'Internal server error. Please try again later.' });
+  }
+};
+
+exports.getRandomProducts = async (req, res) => {
+  try {
+    const count = parseInt(req.query.count) || 4;
+
+    const allProducts = await Product.find().populate('category', 'name');
+
+    if (allProducts.length === 0) {
+      return res.status(404).json({ message: 'No products found.' });
+    }
+
+    const shuffled = allProducts.sort(() => 0.5 - Math.random());
+    const selected = shuffled.slice(0, Math.min(count, allProducts.length));
+
+    res.status(200).json(selected);
+  } catch (error) {
+    console.error('🔥 getRandomProducts error:', error);
+    res.status(500).json({ message: 'Internal server error. Please try again later.' });
   }
 };
