@@ -4,6 +4,8 @@ const { sendMail, buildProductEmail } = require('../utils/mailer')
 const Subcribe = require('../models/Subcribe')
 const User = require('../models/User')
 const mongoose = require('mongoose');
+const fs = require('fs');
+const path = require('path');
 
 // Create product
 exports.createProduct = async (req, res) => {
@@ -16,7 +18,8 @@ exports.createProduct = async (req, res) => {
         rated, 
         subcription, 
         description,
-        category 
+        category,
+        need
     } =  req.body;
 
     const product = await Product.create({
@@ -28,34 +31,23 @@ exports.createProduct = async (req, res) => {
       productImageUrl: req.file?.path,
       subcription,
       description,
-      category
+      category,
+      need // ✅ include this
     });
 
-    console.log('✅ Sản phẩm vừa tạo:', product)
     const [subs, users] = await Promise.all([
       Subcribe.find({}, 'subscribeEmail'),
       User.find({}, 'email')
     ]);
-    
+
     const emails = [
       ...subs.map(s => s.subscribeEmail),
       ...users.map(u => u.email)
     ].filter(Boolean);
 
-    // Log email danh sách
-    console.log('📧 Gửi mail tới:', emails)
     if (emails.length > 0) {
-      const html = buildProductEmail(product)
-    
-      // Log nội dung email
-      console.log('📩 HTML email preview:', html)
-    
-      try {
-        await sendMail(emails.join(','), `🧙‍♀️ Sản phẩm mới tại Nina Witch: ${name.vi}`, html)
-        console.log('✅ Gửi email thành công')
-      } catch (e) {
-        console.error('❌ Gửi email thất bại:', e)
-      }
+      const html = buildProductEmail(product);
+      await sendMail(emails.join(','), `🧙‍♀️ Sản phẩm mới tại Nina Witch: ${name.vi}`, html);
     }
 
     res.status(201).json(product);
@@ -67,23 +59,18 @@ exports.createProduct = async (req, res) => {
 // Get all products
 exports.getProducts = async (req, res) => {
   try {
-    // Lấy thông tin page và limit từ query params, mặc định nếu không truyền vào
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
-
-    // Tính số lượng bản ghi cần skip
     const skip = (page - 1) * limit;
 
-    // Tổng số sản phẩm
     const total = await Product.countDocuments();
 
-    // Lấy danh sách sản phẩm theo trang
     const products = await Product.find()
       .skip(skip)
       .limit(limit)
-      .populate('category', 'name');
+      .populate('category', 'name')
+      .populate('need', 'name'); // ✅ include subCategory
 
-    // Trả về danh sách sản phẩm và tổng số
     res.json({ products, total });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -94,15 +81,16 @@ exports.getProducts = async (req, res) => {
 // Update product
 exports.updateProduct = async (req, res) => {
   try {
-    const { 
-        name, 
-        price, 
-        salePrice, 
-        sold, 
-        rated, 
-        subcription, 
-        description,
-        category 
+    const {
+      name,
+      price,
+      salePrice,
+      sold,
+      rated,
+      subcription,
+      description,
+      category,
+      need // ✅ include this
     } = req.body;
 
     const updatedData = {
@@ -113,20 +101,17 @@ exports.updateProduct = async (req, res) => {
       rated,
       subcription,
       description,
-      category
+      category,
+      need
     };
 
     if (req.file?.path) {
       updatedData.productImageUrl = req.file.path;
     }
 
-    const updated = await Product.findByIdAndUpdate(
-      req.params.id,
-      updatedData,
-      {
-        new: true,
-      }
-    );
+    const updated = await Product.findByIdAndUpdate(req.params.id, updatedData, {
+      new: true,
+    });
 
     if (!updated)
       return res.status(404).json({ message: "Couldn't find product" });
@@ -151,7 +136,7 @@ exports.deleteProduct = async (req, res) => {
 
 exports.getProductById = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id).populate('category', 'name');
+    const product = await Product.findById(req.params.id).populate('category', 'name').populate('need', 'name');
     if (!product)
       return res.status(404).json({ message: "Không tìm thấy sản phẩm" });
     res.json(product);
@@ -203,9 +188,7 @@ exports.filterProducts = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const rawCategory = req.query.category;
-    const rawPriceFrom = req.query.priceFrom;
-    const rawPriceTo = req.query.priceTo;
+    const { category: rawCategory, need: rawNeed, priceFrom: rawPriceFrom, priceTo: rawPriceTo } = req.query;
 
     const priceFrom = rawPriceFrom ? parseFloat(rawPriceFrom) : undefined;
     const priceTo = rawPriceTo ? parseFloat(rawPriceTo) : undefined;
@@ -217,13 +200,9 @@ exports.filterProducts = async (req, res) => {
       return res.status(400).json({ message: 'Invalid priceTo format. Must be a number.' });
     }
 
-    // if (!rawCategory && !rawPriceFrom && !rawPriceTo) {
-    //   return res.status(400).json({ message: 'At least one filter (category or price) must be provided.' });
-    // }
-
     const query = {};
 
-    // ✅ Nếu rawCategory là ObjectId hợp lệ => dùng trực tiếp
+    // Category filter
     if (rawCategory) {
       if (mongoose.Types.ObjectId.isValid(rawCategory)) {
         query.category = rawCategory;
@@ -234,16 +213,30 @@ exports.filterProducts = async (req, res) => {
             { 'name.vi': new RegExp(`^${rawCategory}$`, 'i') }
           ]
         });
-
-        if (!categoryDoc) {
-          return res.status(404).json({ message: `Category "${rawCategory}" not found.` });
-        }
-
+        if (!categoryDoc) return res.status(404).json({ message: `Category "${rawCategory}" not found.` });
         query.category = categoryDoc._id;
       }
     }
 
-    const allProducts = await Product.find(query).populate('category', 'name');
+    // Need filter
+    if (rawNeed) {
+      if (mongoose.Types.ObjectId.isValid(rawNeed)) {
+        query.need = rawNeed;
+      } else {
+        const needDoc = await mongoose.model('Need').findOne({
+          $or: [
+            { 'name.en': new RegExp(`^${rawNeed}$`, 'i') },
+            { 'name.vi': new RegExp(`^${rawNeed}$`, 'i') }
+          ]
+        });
+        if (!needDoc) return res.status(404).json({ message: `Need "${rawNeed}" not found.` });
+        query.need = needDoc._id;
+      }
+    }
+
+    const allProducts = await Product.find(query)
+      .populate('category', 'name')
+      .populate('need', 'name');
 
     const parsePrice = (str) => {
       if (typeof str !== 'string') return NaN;
@@ -253,37 +246,33 @@ exports.filterProducts = async (req, res) => {
 
     const filtered = allProducts.filter((product) => {
       const priceRaw = product.price;
-
-      if (typeof priceRaw === 'string' && priceRaw.toLowerCase().includes('contact')) {
-        return true;
-      }
-
+      if (typeof priceRaw === 'string' && priceRaw.toLowerCase().includes('contact')) return true;
       const priceNum = parsePrice(priceRaw);
       if (isNaN(priceNum)) return false;
-
       if (!isNaN(priceFrom) && priceNum < priceFrom) return false;
       if (!isNaN(priceTo) && priceNum > priceTo) return false;
-
       return true;
     });
 
     const total = filtered.length;
     const paginated = filtered.slice(skip, skip + limit);
 
-    return res.status(200).json({ products: paginated, total });
+    res.status(200).json({ products: paginated, total });
 
   } catch (error) {
     console.error("🔥 filterProducts error:", error);
-    return res.status(500).json({ message: 'Internal server error. Please try again later.' });
+    res.status(500).json({ message: 'Internal server error. Please try again later.' });
   }
 };
+
 
 exports.getRandomProducts = async (req, res) => {
   try {
     const count = parseInt(req.query.count) || 4;
 
-    const allProducts = await Product.find().populate('category', 'name');
-
+    const allProducts = await Product.find()
+      .populate('category', 'name')
+      .populate('need', 'name');
     if (allProducts.length === 0) {
       return res.status(404).json({ message: 'No products found.' });
     }
@@ -295,5 +284,29 @@ exports.getRandomProducts = async (req, res) => {
   } catch (error) {
     console.error('🔥 getRandomProducts error:', error);
     res.status(500).json({ message: 'Internal server error. Please try again later.' });
+  }
+};
+
+exports.exportEnglishProductNames = async (req, res) => {
+  try {
+    const products = await Product.find({}, 'name');
+    const englishNames = products.map(p => p.name?.en).filter(Boolean);
+
+    const filePath = path.join(__dirname, '../exports/englishProductNames.json');
+
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
+    // Ghi ra file JSON
+    fs.writeFileSync(filePath, JSON.stringify(englishNames, null, 2), 'utf-8');
+
+    res.status(200).json({
+      message: 'Exported English product names successfully.',
+      count: englishNames.length,
+      file: '/exports/englishProductNames.json',
+      data: englishNames
+    });
+  } catch (error) {
+    console.error("🔥 exportEnglishProductNames error:", error);
+    res.status(500).json({ message: 'Internal server error while exporting names.' });
   }
 };

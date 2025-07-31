@@ -25,7 +25,11 @@ app.use('/api/products', productRoutes);
 const subcribeRoutes = require('./routes/subcribeRoutes');
 app.use('/api/subcribes', subcribeRoutes);
 
+const needRoutes = require('./routes/needRoutes');
+app.use('/api/needs', needRoutes);
 
+const feedbackRoutes = require("./routes/feedbackRoutes");
+app.use("/api/feedbacks", feedbackRoutes);
 
 mongoose.connect(process.env.MONGO_URI)
   .then(() => {

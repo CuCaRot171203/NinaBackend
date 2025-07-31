@@ -11,7 +11,8 @@ const {
     deleteProduct,
     getProductById,
     filterProducts,
-    getRandomProducts
+    getRandomProducts,
+    exportEnglishProductNames 
 } = require('../controllers/productController');
 
 router.post('/', upload.single('image'), createProduct);
@@ -19,10 +20,10 @@ router.get('/', getProducts);
 router.get('/filter', filterProducts);
 router.get('/filter/advanced', filterProducts);
 router.get('/random', getRandomProducts);
+router.get('/export/english-names', exportEnglishProductNames);
 router.get('/:id', getProductById);
 router.put('/:id', upload.single('image'), updateProduct);
 router.delete('/:id', deleteProduct);
-
 
 
 module.exports = router;
