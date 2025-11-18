@@ -6,8 +6,8 @@ require('dotenv').config();
 const app = express();
 
 app.use(cors({
-  origin: ['http://localhost:8080', 'http://127.0.0.1:8080', 'https://ninawitch-two.vercel.app', 'https://ninawitch-vi.vercel.app', 'https://b49f9e04.ninawitch-final.pages.dev', 'https://ninawitch-final.pages.dev'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],  
+  origin: ['http://localhost:8080', 'http://127.0.0.1:8080', 'https://ninawitch-two.vercel.app', 'https://ninawitch-vi.vercel.app', 'https://b49f9e04.ninawitch-final.pages.dev', 'https://ninawitch-final.pages.dev', 'https://ninawitch.com'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }))
 
