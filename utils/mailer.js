@@ -10,10 +10,12 @@ const transporter = nodemailer.createTransport({
 })
 
 function buildProductEmail(product) {
-  const name = product.name?.vi || 'Không tên'
-  const description = product.description?.vi || 'Không có mô tả'
-  const price = product.salePrice || product.price || 'Liên hệ'
-  const image = product.productImageUrl || 'https://via.placeholder.com/600x400?text=No+Image'
+  const name = product.name?.vi || product.name?.en || 'Không tên';
+  const description = product.description?.vi || product.description?.en || 'Không có mô tả';
+  const price = product.salePrice || product.price || 'Liên hệ';
+  const image = product.productImageUrl || 'https://via.placeholder.com/600x400?text=No+Image';
+  const clientUrl = process.env.CLIENT_URL || 'https://yourdomain.com';
+  const productLink = `${clientUrl.replace(/\/$/, '')}/products/${product._id}`;
 
   return `
     <div style="font-family: Arial, sans-serif; background-color: #f5f5f5; padding: 20px;">
@@ -22,28 +24,71 @@ function buildProductEmail(product) {
         <div style="padding: 20px;">
           <h2 style="color: #333333;">🎉 Sản phẩm mới: ${name}</h2>
           <p style="color: #555555;">${description}</p>
-          <p><strong>Giá:</strong> <span style="color: #e91e63;">${price.toLocaleString()} VNĐ</span></p>
-          <a href="https://yourdomain.com/shop" target="_blank" style="
-            display: inline-block;
-            margin-top: 12px;
-            padding: 10px 16px;
-            background-color: #4CAF50;
-            color: white;
-            text-decoration: none;
-            border-radius: 4px;">Xem sản phẩm</a>
+          <p><strong>Giá:</strong> <span style="color: #e91e63;">${(typeof price === 'number' ? price.toLocaleString() : price)} VNĐ</span></p>
+          <div style="margin-top:12px;text-align:center;">
+            <a href="${productLink}" target="_blank" style="
+              display: inline-block;
+              padding: 10px 16px;
+              background-color: #4CAF50;
+              color: white;
+              text-decoration: none;
+              border-radius: 4px;">Xem chi tiết sản phẩm</a>
+          </div>
         </div>
       </div>
     </div>
-  `
+  `;
 }
 
-function sendMail(to, subject, html) {
-  return transporter.sendMail({
-    from: `"Nina Witch" <${process.env.MAIL_USER}>`,
-    to,
-    subject,
-    html
-  })
+function buildProductEmail(product) {
+  const name = product.name?.vi || product.name?.en || 'Không tên';
+  const description = product.description?.vi || product.description?.en || 'Không có mô tả';
+  const price = product.salePrice || product.price || 'Liên hệ';
+  const image = product.productImageUrl || 'https://via.placeholder.com/600x400?text=No+Image';
+  const clientUrl = process.env.CLIENT_URL || 'https://yourdomain.com';
+  const productLink = `${clientUrl.replace(/\/$/, '')}/products/${product._id}`;
+
+  return `
+    <div style="font-family: Arial, sans-serif; background-color: #f5f5f5; padding: 20px;">
+      <div style="max-width: 600px; margin: auto; background: white; border-radius: 8px; overflow: hidden;">
+        <img src="${image}" alt="${name}" style="width: 100%; object-fit: cover;" />
+        <div style="padding: 20px;">
+          <h2 style="color: #333333;">🎉 Sản phẩm mới: ${name}</h2>
+          <p style="color: #555555;">${description}</p>
+          <p><strong>Giá:</strong> <span style="color: #e91e63;">${(typeof price === 'number' ? price.toLocaleString() : price)} VNĐ</span></p>
+          <div style="margin-top:12px;text-align:center;">
+            <a href="${productLink}" target="_blank" style="
+              display: inline-block;
+              padding: 10px 16px;
+              background-color: #4CAF50;
+              color: white;
+              text-decoration: none;
+              border-radius: 4px;">Xem chi tiết sản phẩm</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
-module.exports = { sendMail, buildProductEmail }
+async function sendMail(toOrOptions, subject, html) {
+  let mailOptions;
+
+  if (typeof toOrOptions === 'object' && toOrOptions !== null && !Array.isArray(toOrOptions)) {
+    mailOptions = {
+      from: `"Nina Witch" <${process.env.MAIL_USER}>`,
+      ...toOrOptions
+    };
+  } else {
+    mailOptions = {
+      from: `"Nina Witch" <${process.env.MAIL_USER}>`,
+      to: toOrOptions,
+      subject,
+      html
+    };
+  }
+
+  return transporter.sendMail(mailOptions);
+}
+
+module.exports = { transporter, sendMail, buildProductEmail }
