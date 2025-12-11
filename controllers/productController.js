@@ -8,33 +8,121 @@ const fs = require('fs');
 const path = require('path');
 
 // Create product
+// exports.createProduct = async (req, res) => {
+//   try {
+//     const { 
+//         name, 
+//         price, 
+//         salePrice, 
+//         sold, 
+//         rated, 
+//         subcription, 
+//         description,
+//         category,
+//         need
+//     } =  req.body;
+
+//     const product = await Product.create({
+//       name,
+//       price,
+//       salePrice: salePrice || price,
+//       sold: sold || 5,
+//       rated: rated || 5,
+//       productImageUrl: req.file?.path,
+//       subcription,
+//       description,
+//       category,
+//       need // ✅ include this
+//     });
+
+//     const [subs, users] = await Promise.all([
+//       Subcribe.find({}, 'subscribeEmail'),
+//       User.find({}, 'email')
+//     ]);
+
+//     const emails = [
+//       ...subs.map(s => s.subscribeEmail),
+//       ...users.map(u => u.email)
+//     ].filter(Boolean);
+
+//     if (emails.length > 0) {
+//       const html = buildProductEmail(product);
+//       await sendMail(emails.join(','), `🧙‍♀️ Sản phẩm mới tại Nina Witch: ${name.vi}`, html);
+//     }
+
+//     res.status(201).json(product);
+//   } catch (error) {
+//     res.status(500).json({ message: error.message });
+//   }
+// };
+
+// helpers
+const safeParse = (val) => {
+  if (val === undefined || val === null) return undefined;
+  if (typeof val === 'object') return val;
+  try { return JSON.parse(val); } catch (e) { return val; }
+};
+const normalizePrice = (v) => {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v === 'number') return v;
+  const cleaned = String(v).replace(/[^\d.-]/g, '');
+  const num = parseFloat(cleaned);
+  return Number.isNaN(num) ? undefined : num;
+};
+
+// Create product
 exports.createProduct = async (req, res) => {
   try {
-    const { 
-        name, 
-        price, 
-        salePrice, 
-        sold, 
-        rated, 
-        subcription, 
-        description,
-        category,
-        need
-    } =  req.body;
+    // Debug logs (tạm thời nếu cần)
+    console.log('--- createProduct req.body ---', req.body);
+    console.log('--- createProduct req.file ---', req.file && {
+      path: req.file.path,
+      secure_url: req.file.secure_url,
+      filename: req.file.filename,
+    });
 
-    const product = await Product.create({
+    // Parse nested fields
+    const name = safeParse(req.body.name);
+    const subcription = safeParse(req.body.subcription);
+    const description = safeParse(req.body.description);
+
+    const price = normalizePrice(req.body.price);
+    const salePrice = normalizePrice(req.body.salePrice) ?? price;
+
+    const {
+      sold,
+      rated,
+      category,
+      need
+    } = req.body;
+
+    const productData = {
       name,
       price,
-      salePrice: salePrice || price,
-      sold: sold || 5,
-      rated: rated || 5,
-      productImageUrl: req.file?.path,
+      salePrice,
+      sold: sold !== undefined ? Number(sold) : 0,
+      rated: rated !== undefined ? Number(rated) : 0,
+      productImageUrl: (req.file && (req.file.path || req.file.secure_url)) || undefined,
       subcription,
       description,
       category,
-      need // ✅ include this
-    });
+      need
+    };
 
+    // Basic validation
+    if (!productData.name || !productData.name.vi || !productData.name.en) {
+      return res.status(400).json({ message: 'Thiếu name.vi hoặc name.en' });
+    }
+    if (!productData.category) {
+      return res.status(400).json({ message: 'Thiếu category' });
+    }
+    if (productData.price === undefined) {
+      return res.status(400).json({ message: 'Giá không hợp lệ hoặc thiếu' });
+    }
+
+    const product = await Product.create(productData);
+
+    // Notify subscribers/users (if any)
     const [subs, users] = await Promise.all([
       Subcribe.find({}, 'subscribeEmail'),
       User.find({}, 'email')
@@ -47,12 +135,17 @@ exports.createProduct = async (req, res) => {
 
     if (emails.length > 0) {
       const html = buildProductEmail(product);
-      await sendMail(emails.join(','), `🧙‍♀️ Sản phẩm mới tại Nina Witch: ${name.vi}`, html);
+      const subjectName = (product.name && product.name.vi) ? product.name.vi : 'Sản phẩm mới';
+      await sendMail(emails.join(','), `🧙‍♀️ Sản phẩm mới tại Nina Witch: ${subjectName}`, html);
     }
 
     res.status(201).json(product);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error("🔥 createProduct error:", error);
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+    }
+    res.status(500).json({ message: error.message || 'Internal server error' });
   }
 };
 
@@ -79,38 +172,83 @@ exports.getProducts = async (req, res) => {
 
 
 // Update product
+// exports.updateProduct = async (req, res) => {
+//   try {
+//     const {
+//       name,
+//       price,
+//       salePrice,
+//       sold,
+//       rated,
+//       subcription,
+//       description,
+//       category,
+//       need // ✅ include this
+//     } = req.body;
+
+//     const updatedData = {
+//       name,
+//       price,
+//       salePrice: salePrice || price,
+//       sold,
+//       rated,
+//       subcription,
+//       description,
+//       category,
+//       need
+//     };
+
+//     if (req.file?.path) {
+//       updatedData.productImageUrl = req.file.path;
+//     }
+
+//     const updated = await Product.findByIdAndUpdate(req.params.id, updatedData, {
+//       new: true,
+//     });
+
+//     if (!updated)
+//       return res.status(404).json({ message: "Couldn't find product" });
+
+//     res.json(updated);
+//   } catch (error) {
+//     res.status(500).json({ message: error.message });
+//   }
+// };
+
 exports.updateProduct = async (req, res) => {
   try {
-    const {
-      name,
-      price,
-      salePrice,
-      sold,
-      rated,
-      subcription,
-      description,
-      category,
-      need // ✅ include this
-    } = req.body;
+    console.log('--- updateProduct req.body ---', req.body);
+    console.log('--- updateProduct req.file ---', req.file && {
+      path: req.file.path,
+      secure_url: req.file.secure_url,
+      filename: req.file.filename,
+    });
 
-    const updatedData = {
-      name,
-      price,
-      salePrice: salePrice || price,
-      sold,
-      rated,
-      subcription,
-      description,
-      category,
-      need
-    };
+    const name = safeParse(req.body.name);
+    const subcription = safeParse(req.body.subcription);
+    const description = safeParse(req.body.description);
 
-    if (req.file?.path) {
-      updatedData.productImageUrl = req.file.path;
+    const price = normalizePrice(req.body.price);
+    const salePrice = normalizePrice(req.body.salePrice);
+
+    const updatedData = {};
+
+    if (name) updatedData.name = name;
+    if (price !== undefined) updatedData.price = price;
+    if (salePrice !== undefined) updatedData.salePrice = salePrice;
+    if (req.body.sold !== undefined) updatedData.sold = Number(req.body.sold);
+    if (req.body.rated !== undefined) updatedData.rated = Number(req.body.rated);
+    if (subcription) updatedData.subcription = subcription;
+    if (description) updatedData.description = description;
+    if (req.body.category) updatedData.category = req.body.category;
+    if (req.body.need) updatedData.need = req.body.need;
+    if (req.file && (req.file.path || req.file.secure_url)) {
+      updatedData.productImageUrl = req.file.path || req.file.secure_url;
     }
 
     const updated = await Product.findByIdAndUpdate(req.params.id, updatedData, {
       new: true,
+      runValidators: true
     });
 
     if (!updated)
@@ -118,7 +256,11 @@ exports.updateProduct = async (req, res) => {
 
     res.json(updated);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error("🔥 updateProduct error:", error);
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+    }
+    res.status(500).json({ message: error.message || 'Internal server error' });
   }
 };
 
