@@ -69,19 +69,26 @@ const normalizePrice = (v) => {
   const num = parseFloat(cleaned);
   return Number.isNaN(num) ? undefined : num;
 };
+// helper timeout wrapper
+const withTimeout = (p, ms, label = 'operation') => {
+  let timer;
+  const timeout = new Promise((_, rej) => {
+    timer = setTimeout(() => rej(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([p.then(r => { clearTimeout(timer); return r }), timeout]);
+};
 
-// Create product
+// New createProduct
 exports.createProduct = async (req, res) => {
   try {
-    // Debug logs (tạm thời nếu cần)
     console.log('--- createProduct req.body ---', req.body);
-    console.log('--- createProduct req.file ---', req.file && {
+    console.log('--- createProduct req.file ---', !!req.file, req.file && {
       path: req.file.path,
       secure_url: req.file.secure_url,
       filename: req.file.filename,
     });
 
-    // Parse nested fields
+    // Parse + normalize
     const name = safeParse(req.body.name);
     const subcription = safeParse(req.body.subcription);
     const description = safeParse(req.body.description);
@@ -89,12 +96,18 @@ exports.createProduct = async (req, res) => {
     const price = normalizePrice(req.body.price);
     const salePrice = normalizePrice(req.body.salePrice) ?? price;
 
-    const {
-      sold,
-      rated,
-      category,
-      need
-    } = req.body;
+    const { sold, rated, category, need } = req.body;
+
+    // Minimal validation
+    if (!name || !name.vi || !name.en) {
+      return res.status(400).json({ message: 'Thiếu name.vi hoặc name.en' });
+    }
+    if (!category) {
+      return res.status(400).json({ message: 'Thiếu category' });
+    }
+    if (price === undefined) {
+      return res.status(400).json({ message: 'Giá không hợp lệ hoặc thiếu' });
+    }
 
     const productData = {
       name,
@@ -102,46 +115,63 @@ exports.createProduct = async (req, res) => {
       salePrice,
       sold: sold !== undefined ? Number(sold) : 0,
       rated: rated !== undefined ? Number(rated) : 0,
-      productImageUrl: (req.file && (req.file.path || req.file.secure_url)) || undefined,
+      productImageUrl: req.file && (req.file.path || req.file.secure_url) || undefined,
       subcription,
       description,
       category,
       need
     };
 
-    // Basic validation
-    if (!productData.name || !productData.name.vi || !productData.name.en) {
-      return res.status(400).json({ message: 'Thiếu name.vi hoặc name.en' });
-    }
-    if (!productData.category) {
-      return res.status(400).json({ message: 'Thiếu category' });
-    }
-    if (productData.price === undefined) {
-      return res.status(400).json({ message: 'Giá không hợp lệ hoặc thiếu' });
-    }
-
+    // Create product quickly (DB op)
     const product = await Product.create(productData);
 
-    // Notify subscribers/users (if any)
-    const [subs, users] = await Promise.all([
-      Subcribe.find({}, 'subscribeEmail'),
-      User.find({}, 'email')
-    ]);
-
-    const emails = [
-      ...subs.map(s => s.subscribeEmail),
-      ...users.map(u => u.email)
-    ].filter(Boolean);
-
-    if (emails.length > 0) {
-      const html = buildProductEmail(product);
-      const subjectName = (product.name && product.name.vi) ? product.name.vi : 'Sản phẩm mới';
-      await sendMail(emails.join(','), `🧙‍♀️ Sản phẩm mới tại Nina Witch: ${subjectName}`, html);
-    }
-
+    // Immediately respond so client không bị timeout
     res.status(201).json(product);
+
+    // Background tasks (non-blocking)
+    setImmediate(async () => {
+      try {
+        // 1) Log if file exists but no URL set
+        if (req.file && !product.productImageUrl) {
+          console.warn('Warning: file provided but no productImageUrl set on req.file:', req.file);
+        }
+
+        // 2) Fetch subscribers and users with timeout
+        let subs = [], users = [];
+        try {
+          const [subsRes, usersRes] = await withTimeout(
+            Promise.all([ Subcribe.find({}, 'subscribeEmail').lean(), User.find({}, 'email').lean() ]),
+            5000,
+            'fetch-subs-and-users'
+          );
+          subs = subsRes || [];
+          users = usersRes || [];
+        } catch (err) {
+          console.error('Warning: fetch subs/users failed or timed out:', err.message || err);
+        }
+
+        const emails = [
+          ...subs.map(s => s.subscribeEmail),
+          ...users.map(u => u.email)
+        ].filter(Boolean);
+
+        if (emails.length > 0) {
+          const html = buildProductEmail(product);
+          try {
+            // sendMail wrapped with timeout (8s)
+            await withTimeout(sendMail(emails.join(','), `🧙‍♀️ Sản phẩm mới tại Nina Witch: ${product.name?.vi || 'Sản phẩm mới'}`, html), 8000, 'sendMail');
+            console.log('Notification emails sent for product', product._id);
+          } catch (err) {
+            console.error('Failed to send notification emails (non-fatal):', err.message || err);
+          }
+        }
+      } catch (bgErr) {
+        console.error('Background tasks error:', bgErr);
+      }
+    });
+
   } catch (error) {
-    console.error("🔥 createProduct error:", error);
+    console.error("🔥 createProduct error (main):", error);
     if (error.name === 'ValidationError') {
       return res.status(400).json({ message: 'Validation error', errors: error.errors });
     }
